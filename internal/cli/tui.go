@@ -29,7 +29,7 @@ func runTUI(cmd *cobra.Command, _ []string) error {
 		Worktrees: a.Worktrees,
 		Sessions:  a.Sessions,
 		Log:       a.Log,
-		Version:   version,
+		Version:   effectiveVersion(),
 		Repo:      repoSlug,
 	})
 }
