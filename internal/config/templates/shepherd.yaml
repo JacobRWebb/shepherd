@@ -1,0 +1,93 @@
+# .shepherd.yaml — Shepherd configuration.
+# Search order: --config flag, then .shepherd.yaml found by walking up from the
+# working directory, then the per-user config dir. Env overrides use SHEPHERD_
+# with __ as the nesting separator, e.g. SHEPHERD_CLAUDE__MODEL=opus.
+
+version: 1
+
+# ── Worktrees ────────────────────────────────────────────────────────────────
+worktrees:
+  # Root dir where isolated worktrees are created. Relative paths resolve against
+  # the repo root. Keep this OUTSIDE the working tree to avoid recursive scans.
+  root: "../.shepherd-worktrees"
+  name_template: "{slug}"       # tokens: {slug} (from issue/task), {n} (short uuid on collision)
+  branch_prefix: "shepherd/"    # branches e.g. shepherd/fix-login-timeout
+  base_branch: ""               # base to branch from; empty = repo default branch (origin/HEAD)
+  auto_cleanup: true            # remove merged worktrees on `status --prune`
+
+# ── Git provider (forge) ─────────────────────────────────────────────────────
+forge:
+  provider: github              # github | bitbucket
+  github:
+    host: github.com            # for GitHub Enterprise, set your host
+    default_reviewers: []       # logins requested on PRs Shepherd opens
+    draft_prs: false            # open PRs as drafts first
+  bitbucket:
+    base_url: "https://api.bitbucket.org/2.0"
+    workspace: ""               # bitbucket workspace slug
+    repo_slug: ""               # repository slug (defaults to git remote name)
+    # Auth uses an Atlassian API token (app passwords are deprecated). The values
+    # below are env var NAMES; the secrets themselves live in those env vars.
+    email_env: "BITBUCKET_EMAIL"      # holds your Atlassian account email
+    token_env: "BITBUCKET_API_TOKEN"  # holds the API token
+    default_reviewers: []       # account UUIDs
+
+# ── Session backend (how agent processes are hosted) ─────────────────────────
+session:
+  backend: auto                 # auto | tmux | native  (auto: tmux if on PATH & not native-Windows, else native)
+  tmux:
+    socket_name: "shepherd"     # tmux -L <socket_name> to isolate from your own sessions
+    session_prefix: "shp-"      # tmux session names: shp-<name>
+    wsl: false                  # reserved: invoke tmux through WSL on native Windows
+  native:
+    log_dir: ".shepherd/logs"   # per-session combined stdout/stderr logs
+    detach: true                # spawn detached so sessions outlive the shepherd process
+
+# ── Claude (agent) invocation ────────────────────────────────────────────────
+claude:
+  binary: "claude"             # path or name; resolved on PATH (.cmd/.exe added on Windows)
+  model: ""                    # alias (opus|sonnet|fable) or full name; empty = claude default
+  fallback_model: ""           # automatic fallback when primary is overloaded (headless only)
+  permission_mode: "default"   # default|plan|acceptEdits|dontAsk|auto|bypassPermissions
+  dangerously_skip_permissions: false  # autonomous runs only; bypasses ALL permission checks
+  effort: ""                   # low|medium|high|xhigh|max  (empty = claude default)
+  add_dirs: []                 # extra --add-dir paths granted to the agent (besides the worktree)
+  append_system_prompt: ""     # appended to the default system prompt for every Shepherd agent
+  allowed_tools: []            # --allowed-tools entries, e.g. ["Bash(git *)","Edit","Read"]
+  disallowed_tools: []         # --disallowed-tools entries
+  headless:
+    output_format: "json"      # text | json | stream-json (Shepherd parses json/stream-json)
+    max_budget_usd: 0          # 0 = unlimited; --max-budget-usd (print mode only)
+    timeout_seconds: 1800      # Shepherd-side hard timeout for a headless run
+  extra_args: []               # raw passthrough args appended last (escape hatch)
+
+# ── Validation pipeline (the clean push gate; run inside a worktree) ──────────
+validation:
+  stop_on_failure: true        # abort remaining steps after the first required failure
+  default_timeout: "5m"        # per-step timeout when a step does not set its own
+  env:                         # merged over the environment for every step
+    CI: "true"
+  steps:
+    - { name: build, run: "go build ./..." }
+    - { name: test,  run: "go test ./...", timeout: "10m" }
+    - { name: vet,   run: "go vet ./..." }
+    # A custom "review" step can shell out to claude; continue_on_error keeps it advisory.
+    - name: review
+      run: 'claude -p "Review the staged diff; exit non-zero on blocking issues"'
+      continue_on_error: true
+
+# ── Notifications ────────────────────────────────────────────────────────────
+notifications:
+  enabled: false
+  on_events: [pr_opened, pr_merged, validation_failed, agent_finished]
+  channels: [terminal]         # terminal | webhook | command
+  webhook:
+    url_env: "SHEPHERD_WEBHOOK_URL"  # env var holding a webhook URL (empty = off)
+    format: slack                    # slack | json
+  command: ""                  # arbitrary command run per event; event JSON on stdin
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+logging:
+  level: "info"                # debug | info | warn | error
+  format: "console"            # console (human, colored) | json
+  file: ""                     # also write logs to this path (empty = stderr only)
