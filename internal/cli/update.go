@@ -20,7 +20,7 @@ func newUpdateCmd() *cobra.Command {
 		Short: "Update shepherd to the latest release",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			st := stateFrom(cmd)
-			res, err := updater.Update(cmd.Context(), repoSlug, version, checkOnly)
+			res, err := updater.Update(cmd.Context(), repoSlug, effectiveVersion(), checkOnly)
 			if err != nil {
 				return err
 			}
@@ -66,7 +66,7 @@ func maybeNotifyUpdate(cmd *cobra.Command) {
 	if st == nil || st.JSON {
 		return
 	}
-	info := updater.CachedCheck(cmd.Context(), repoSlug, version)
+	info := updater.CachedCheck(cmd.Context(), repoSlug, effectiveVersion())
 	if !info.Available {
 		return
 	}

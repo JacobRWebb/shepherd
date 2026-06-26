@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"runtime"
+	"runtime/debug"
 
 	"github.com/spf13/cobra"
 )
@@ -15,14 +16,30 @@ var (
 	date    = "unknown"
 )
 
+// effectiveVersion returns the ldflags-injected version (release builds), or
+// falls back to the module version embedded by `go install` (debug.BuildInfo),
+// then "dev" for plain local builds.
+func effectiveVersion() string {
+	if version != "dev" && version != "" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		if v := bi.Main.Version; v != "" && v != "(devel)" {
+			return v
+		}
+	}
+	return version
+}
+
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print version information",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			st := stateFrom(cmd)
+			v := effectiveVersion()
 			info := map[string]string{
-				"version": version,
+				"version": v,
 				"commit":  commit,
 				"date":    date,
 				"go":      runtime.Version(),
@@ -31,7 +48,7 @@ func newVersionCmd() *cobra.Command {
 			}
 			st.Out.Result(info, func() string {
 				return fmt.Sprintf("shepherd %s (commit %s, built %s, %s %s/%s)",
-					version, commit, date, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+					v, commit, date, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 			})
 			return nil
 		},
