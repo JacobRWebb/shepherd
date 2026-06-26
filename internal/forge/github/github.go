@@ -16,6 +16,7 @@ import (
 
 	"github.com/JacobRWebb/shepherd/internal/config"
 	"github.com/JacobRWebb/shepherd/internal/domain"
+	"github.com/JacobRWebb/shepherd/internal/sysproc"
 )
 
 const prFields = "number,id,title,body,state,isDraft,url,headRefName,baseRefName,headRefOid,author,mergeable,reviewDecision,createdAt,updatedAt"
@@ -41,6 +42,7 @@ func (c *Client) Name() string { return "github" }
 // exit is not a Go error here (callers decide); only a failure to launch gh is.
 func (c *Client) gh(ctx context.Context, stdin string, args ...string) (string, string, int, error) {
 	cmd := exec.CommandContext(ctx, "gh", args...)
+	sysproc.Hide(cmd)
 	env := os.Environ()
 	if c.host != "" {
 		env = append(env, "GH_HOST="+c.host)
@@ -294,6 +296,7 @@ func (c *Client) ListComments(ctx context.Context, r domain.Repo, number int) ([
 
 	var top struct {
 		Comments []struct {
+			ID     string `json:"id"`
 			Author struct {
 				Login string `json:"login"`
 			} `json:"author"`
@@ -308,12 +311,17 @@ func (c *Client) ListComments(ctx context.Context, r domain.Repo, number int) ([
 		return nil, err
 	}
 	for _, cm := range top.Comments {
-		out = append(out, domain.Comment{Author: cm.Author.Login, Body: cm.Body, URL: cm.URL, CreatedAt: cm.CreatedAt})
+		id := cm.ID
+		if id == "" {
+			id = cm.URL // fall back to URL so each comment still has a stable key
+		}
+		out = append(out, domain.Comment{ID: id, Author: cm.Author.Login, Body: cm.Body, URL: cm.URL, CreatedAt: cm.CreatedAt})
 	}
 
 	// Inline review comments are not in `--json comments`; fetch via the REST API.
 	if r.Owner != "" && r.Name != "" {
 		var inline []struct {
+			ID      int64  `json:"id"`
 			Body    string `json:"body"`
 			Path    string `json:"path"`
 			Line    int    `json:"line"`
@@ -327,7 +335,7 @@ func (c *Client) ListComments(ctx context.Context, r domain.Repo, number int) ([
 		if err := c.ghJSON(ctx, &inline, "api", apiPath, "--paginate"); err == nil {
 			for _, ic := range inline {
 				out = append(out, domain.Comment{
-					Author: ic.User.Login, Body: ic.Body, Path: ic.Path, Line: ic.Line,
+					ID: fmt.Sprintf("review-%d", ic.ID), Author: ic.User.Login, Body: ic.Body, Path: ic.Path, Line: ic.Line,
 					IsReview: true, URL: ic.HTMLURL, CreatedAt: ic.CreatedAt,
 				})
 			}

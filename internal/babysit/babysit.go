@@ -194,16 +194,33 @@ func (d Deps) freshFeedback(ctx context.Context, pr domain.PullRequest, processe
 	}
 	var fresh []domain.Comment
 	for _, c := range comments {
-		if c.ID == "" || processed[c.ID] {
+		if strings.TrimSpace(c.Body) == "" {
 			continue
 		}
-		processed[c.ID] = true
-		if isShepherdComment(c) || strings.TrimSpace(c.Body) == "" {
+		key := commentKey(c)
+		if processed[key] {
+			continue
+		}
+		processed[key] = true
+		if isShepherdComment(c) {
 			continue
 		}
 		fresh = append(fresh, c)
 	}
 	return fresh
+}
+
+// commentKey is a stable identity for a comment used to handle it at most once.
+// It prefers the provider ID, then the URL, then the content — so a comment is
+// never silently dropped just because a provider omitted an ID.
+func commentKey(c domain.Comment) string {
+	if c.ID != "" {
+		return c.ID
+	}
+	if c.URL != "" {
+		return c.URL
+	}
+	return c.Author + "|" + c.CreatedAt.String() + "|" + c.Body
 }
 
 // reconcileFeedback asks the agent to assess each point of feedback, implement
