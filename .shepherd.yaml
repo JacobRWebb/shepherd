@@ -21,6 +21,10 @@ claude:
 validation:
   stop_on_failure: true
   default_timeout: "10m"
+  env:
+    # Go stamps VCS info during build/test, which fails inside a linked git
+    # worktree ("error obtaining VCS status"). Disable it for the gate.
+    GOFLAGS: "-buildvcs=false"
   steps:
     - { name: build, run: "go build ./..." }
     - { name: test, run: "go test ./..." }

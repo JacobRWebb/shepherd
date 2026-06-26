@@ -67,6 +67,9 @@ validation:
   default_timeout: "5m"        # per-step timeout when a step does not set its own
   env:                         # merged over the environment for every step
     CI: "true"
+    # Go projects: the gate runs inside a linked worktree, where `go build`/`test`
+    # VCS stamping fails. Uncomment to disable it:
+    # GOFLAGS: "-buildvcs=false"
   steps:
     - { name: build, run: "go build ./..." }
     - { name: test,  run: "go test ./...", timeout: "10m" }

@@ -51,6 +51,10 @@ each step is `{name, run, timeout?, continue_on_error?, workdir?}`. Steps run in
 worktree via the platform shell. `continue_on_error` steps are advisory (they don't
 block the gate).
 
+**Go tip:** steps run inside a *linked* git worktree, where `go build`/`go test` VCS
+stamping fails with `error obtaining VCS status`. Set `env: { GOFLAGS: "-buildvcs=false" }`
+for Go projects (Shepherd's own `.shepherd.yaml` does this).
+
 ### `notifications`
 `enabled`, `on_events`, `channels` (`terminal|webhook|command`),
 `webhook.{url_env,format}` (`slack|json`), `command` (receives the event JSON on stdin).
