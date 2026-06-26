@@ -244,7 +244,10 @@ func CachedCheck(ctx context.Context, repo, current string) CheckInfo {
 	lv := strings.TrimPrefix(latest, "v")
 	info.Latest = lv
 	cur := strings.TrimPrefix(current, "v")
-	if cur != "" && cur != "dev" && cur != lv {
+	// Only nag clean release versions that differ from latest. Skip dev builds
+	// and pseudo/pre-release/dirty versions (which contain "-" or "+") so a
+	// local build isn't told to "update" to an older tag.
+	if cur != "" && cur != "dev" && !strings.ContainsAny(cur, "-+") && cur != lv {
 		info.Available = true
 	}
 	return info

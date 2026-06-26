@@ -7,13 +7,15 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/JacobRWebb/shepherd/internal/crew"
+	"github.com/JacobRWebb/shepherd/internal/domain"
 )
 
 func newCrewCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "crew <task-description>",
+		Use:   "crew [task-description]",
 		Short: "Decompose work into parallel agents, one worktree each",
-		Args:  cobra.MinimumNArgs(1),
+		Long:  "Decompose work into parallel agents, one worktree each.\nProvide a task description to plan automatically, or --tasks <file> with one task per line.",
+		Args:  cobra.ArbitraryArgs,
 		RunE:  runCrew,
 	}
 	cmd.Flags().IntP("agents", "n", 3, "target number of parallel agents")
@@ -40,6 +42,10 @@ func runCrew(cmd *cobra.Command, args []string) error {
 
 	n, _ := cmd.Flags().GetInt("agents")
 	tasksFile, _ := cmd.Flags().GetString("tasks")
+
+	if len(args) == 0 && strings.TrimSpace(tasksFile) == "" {
+		return domain.InvalidInputf("provide a task description or --tasks <file>")
+	}
 	base, _ := cmd.Flags().GetString("base")
 	model, _ := cmd.Flags().GetString("model")
 	detach, _ := cmd.Flags().GetBool("detach")
