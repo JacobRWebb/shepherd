@@ -43,11 +43,22 @@ func processAlive(pid int) bool {
 // killTree terminates the process and its descendants (claude spawns node/git/
 // ripgrep). taskkill /T walks the tree; /F forces.
 func killTree(pid int, force bool) error {
-	args := []string{"/PID", strconv.Itoa(pid), "/T"}
-	if force {
-		args = append(args, "/F")
+	run := func(useForce bool) error {
+		args := []string{"/PID", strconv.Itoa(pid), "/T"}
+		if useForce {
+			args = append(args, "/F")
+		}
+		cmd := exec.Command("taskkill", args...)
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
+		return cmd.Run()
 	}
-	cmd := exec.Command("taskkill", args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
-	return cmd.Run()
+	// A graceful taskkill (no /F) cannot terminate a console-less detached
+	// process, so it would leave an orphan. Try graceful first, then escalate to
+	// a forced kill so `stop` is always reliable.
+	if !force {
+		if err := run(false); err == nil {
+			return nil
+		}
+	}
+	return run(true)
 }
