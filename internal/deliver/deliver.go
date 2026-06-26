@@ -2,9 +2,10 @@
 // studies the repo and proposes an approach (grounded on the base branch),
 // Shepherd opens a worktree, an agent implements and self-verifies, the
 // validation gate runs (with bounded auto-fix), a PR is opened, and — unless
-// disabled — babysit watches CI and reconciles review feedback until the human
-// merges. The two human touchpoints are the idea at the start and the merge
-// (or review feedback) at the end.
+// disabled — a detached babysit session is left running to watch CI and
+// reconcile review feedback until you merge or stop it. The two human
+// touchpoints are the idea at the start and the merge (or review feedback) at
+// the end; nothing in between needs a held-open terminal.
 package deliver
 
 import (
@@ -20,8 +21,8 @@ import (
 	"github.com/JacobRWebb/shepherd/internal/babysit"
 	"github.com/JacobRWebb/shepherd/internal/domain"
 	"github.com/JacobRWebb/shepherd/internal/forge"
-	"github.com/JacobRWebb/shepherd/internal/notify"
 	"github.com/JacobRWebb/shepherd/internal/pipeline"
+	"github.com/JacobRWebb/shepherd/internal/session"
 	"github.com/JacobRWebb/shepherd/internal/ship"
 	"github.com/JacobRWebb/shepherd/internal/worktree"
 )
@@ -32,7 +33,8 @@ type Deps struct {
 	Agent     agent.Launcher
 	Forge     forge.Forge
 	Runner    *pipeline.Runner
-	Notifier  notify.Notifier
+	Sessions  session.SessionBackend
+	Self      string // path to the shepherd executable (for the detached babysit)
 	Repo      domain.Repo
 	RepoRoot  string
 	Log       *zerolog.Logger
@@ -48,21 +50,20 @@ type Options struct {
 	Draft     bool
 	Reviewers []string
 
-	MaxFixAttempts       int
-	Babysit              bool
-	BabysitInterval      time.Duration
-	BabysitMaxIterations int
+	MaxFixAttempts  int
+	Babysit         bool
+	BabysitInterval time.Duration
 }
 
 // Result is the structured outcome of a deliver run.
 type Result struct {
-	Idea    string      `json:"idea"`
-	Plan    string      `json:"plan,omitempty"`
-	Branch  string      `json:"branch"`
-	Dir     string      `json:"dir"`
-	Ship    ship.Result `json:"ship"`
-	PRURL   string      `json:"pr_url,omitempty"`
-	Babysat bool        `json:"babysat"`
+	Idea           string      `json:"idea"`
+	Plan           string      `json:"plan,omitempty"`
+	Branch         string      `json:"branch"`
+	Dir            string      `json:"dir"`
+	Ship           ship.Result `json:"ship"`
+	PRURL          string      `json:"pr_url,omitempty"`
+	BabysitSession string      `json:"babysit_session,omitempty"`
 }
 
 // Run executes the full loop for one idea.
@@ -135,25 +136,16 @@ func Run(ctx context.Context, d Deps, o Options) (Result, error) {
 		res.PRURL = sres.PR.URL
 	}
 
-	// 6. Babysit the PR loop until the human merges.
+	// 6. Leave a persistent babysit watching the PR. It runs detached until you
+	//    merge the PR or stop it (`shepherd stop`), reconciling CI failures and
+	//    review feedback on its own — no terminal to hold, nothing to re-run.
 	if o.Babysit && sres.PR != nil {
-		res.Babysat = true
-		d.Log.Info().Int("pr", sres.PR.Number).Msg("deliver: babysitting the PR until merge (Ctrl-C stops watching; the PR stays open)")
-		if err := babysit.Run(ctx, babysit.Deps{
-			Forge:     d.Forge,
-			Agent:     d.Agent,
-			Worktrees: d.Worktrees,
-			Notifier:  d.Notifier,
-			Repo:      d.Repo,
-			Log:       d.Log,
-		}, babysit.Options{
-			PR:             sres.PR.Number,
-			Interval:       o.BabysitInterval,
-			MaxIterations:  o.BabysitMaxIterations,
-			MaxFixAttempts: o.MaxFixAttempts,
-			AutoFix:        true,
-		}); err != nil {
-			return res, err
+		info, berr := babysit.StartDetached(context.Background(), d.Sessions, d.Self, d.RepoRoot, sres.PR.Number, o.BabysitInterval)
+		if berr != nil {
+			d.Log.Warn().Err(berr).Msg("deliver: could not start the background babysit; run `shepherd babysit` yourself")
+		} else {
+			res.BabysitSession = info.Name
+			d.Log.Info().Str("session", info.Name).Int("pr", sres.PR.Number).Msg("deliver: babysitting in the background until you merge or stop it")
 		}
 	}
 	return res, nil
@@ -165,6 +157,7 @@ func design(ctx context.Context, d Deps, o Options) (string, error) {
 			"Idea: %s\n\n"+
 			"Study the existing code and propose the best, smallest implementation that fits the project's "+
 			"conventions. Output a concise plan: which files to add/change, the approach, and how to validate it. "+
+			"Respond with only the plan itself — no preamble, and no remarks about tools or next steps. "+
 			"Plan only — do not write any code yet.",
 		baseLabel(o.Base), o.Idea)
 	res, err := d.Agent.Headless(ctx, domain.Worktree{Path: d.RepoRoot}, agent.HeadlessSpec{

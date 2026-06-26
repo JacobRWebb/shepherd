@@ -32,7 +32,9 @@ The `error.code` field mirrors these: `invalid_input`, `not_found`, `conflict`,
 Deliver an idea end to end — design, implement, test, open a PR, and babysit it to merge:
 ```sh
 shepherd deliver "add a /healthz endpoint" --json
-# => data.{branch, plan, pr_url, ship.gate_passed, babysat}
+# => data.{branch, plan, pr_url, ship.gate_passed, babysit_session}
+# Returns once the PR is open; babysit_session names a DETACHED watcher that keeps
+# reconciling CI + your review feedback until you merge or `shepherd stop` it.
 # Two human touchpoints only: the idea (here) and the merge/review at the end.
 # --babysit=false stops after opening the PR; --discuss adds interactive planning.
 ```
@@ -68,12 +70,13 @@ shepherd crew "migrate to the new API" -n 4 --ship --json
 # Without --ship, worktrees are left in place for a manual `shepherd ship <branch>`.
 ```
 
-Keep a PR green and reconcile review feedback:
+Keep a PR green and reconcile review feedback (runs until merged/closed or stopped):
 ```sh
-shepherd babysit 42 --json
+shepherd babysit 42 --detach --json   # persistent background watcher; returns a session
+shepherd babysit 42                   # same loop in the foreground
 # Polls CI, auto-fixes safe failures, and reads new human review comments:
 # it asks the agent to judge each point, implements the valid ones, pushes,
-# and replies. It never merges — that stays with you.
+# and replies. It never merges — that stays with you. Stop it with `shepherd stop`.
 ```
 
 Inspect everything:

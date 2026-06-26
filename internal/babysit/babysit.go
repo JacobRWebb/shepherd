@@ -37,8 +37,9 @@ type Options struct {
 	AutoFix        bool
 }
 
-// Run polls the PR until it is resolved, merged/closed, or the loop budget is
-// exhausted.
+// Run polls the PR until it is merged/closed, the context is cancelled, or the
+// loop budget is exhausted. A non-positive MaxIterations means "watch forever"
+// — the loop only ends when the PR resolves or the process is stopped.
 func Run(ctx context.Context, d Deps, o Options) error {
 	if d.Forge == nil {
 		return domain.InvalidInputf("babysit requires a configured forge")
@@ -51,7 +52,7 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	notifiedGreen := false
 	processed := map[string]bool{} // review-comment IDs already handled
 
-	for iter := 0; iter < o.MaxIterations; iter++ {
+	for iter := 0; o.MaxIterations <= 0 || iter < o.MaxIterations; iter++ {
 		pr, err := d.Forge.GetPR(ctx, d.Repo, o.PR)
 		if err != nil {
 			return err
@@ -133,7 +134,9 @@ func Run(ctx context.Context, d Deps, o Options) error {
 		}
 	}
 
-	d.notify(ctx, "warn", fmt.Sprintf("babysit gave up on PR #%d after %d iterations", o.PR, o.MaxIterations), "", "", nil)
+	if o.MaxIterations > 0 {
+		d.notify(ctx, "warn", fmt.Sprintf("babysit gave up on PR #%d after %d iterations", o.PR, o.MaxIterations), "", "", nil)
+	}
 	return nil
 }
 

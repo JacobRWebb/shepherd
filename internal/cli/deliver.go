@@ -2,13 +2,13 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/JacobRWebb/shepherd/internal/deliver"
-	"github.com/JacobRWebb/shepherd/internal/notify"
 	"github.com/JacobRWebb/shepherd/internal/pipeline"
 )
 
@@ -18,8 +18,9 @@ func newDeliverCmd() *cobra.Command {
 		Short: "Autonomously design, implement, test, open a PR, and babysit it to merge",
 		Long: "deliver runs the whole loop for one idea: an agent studies the repo and proposes an\n" +
 			"approach, Shepherd opens a worktree, an agent implements and self-verifies, the\n" +
-			"validation gate runs (with bounded auto-fix), a PR is opened, and babysit watches CI\n" +
-			"and reconciles your review feedback until you merge.",
+			"validation gate runs (with bounded auto-fix), a PR is opened, and a detached babysit\n" +
+			"session is left running to watch CI and reconcile your review feedback until you\n" +
+			"merge or stop it. Two human touchpoints: the idea here, the merge at the end.",
 		Args: cobra.MinimumNArgs(1),
 		RunE: runDeliver,
 	}
@@ -30,9 +31,8 @@ func newDeliverCmd() *cobra.Command {
 	cmd.Flags().Bool("draft", false, "open the PR as a draft")
 	cmd.Flags().StringSlice("reviewer", nil, "request reviewers on the PR")
 	cmd.Flags().Int("max-fix-attempts", 3, "max auto-fix attempts for the gate and CI/feedback")
-	cmd.Flags().Bool("babysit", true, "after opening the PR, watch CI and reconcile feedback until merge")
+	cmd.Flags().Bool("babysit", true, "leave a detached babysit watching the PR until you merge or stop it")
 	cmd.Flags().Duration("interval", 30*time.Second, "babysit base poll interval")
-	cmd.Flags().Int("max-iterations", 80, "babysit hard cap on poll cycles")
 	return cmd
 }
 
@@ -56,6 +56,7 @@ func runDeliver(cmd *cobra.Command, args []string) error {
 	if perr != nil {
 		return perr
 	}
+	self, _ := os.Executable()
 
 	base, _ := cmd.Flags().GetString("base")
 	model, _ := cmd.Flags().GetString("model")
@@ -66,7 +67,6 @@ func runDeliver(cmd *cobra.Command, args []string) error {
 	maxFix, _ := cmd.Flags().GetInt("max-fix-attempts")
 	doBabysit, _ := cmd.Flags().GetBool("babysit")
 	interval, _ := cmd.Flags().GetDuration("interval")
-	maxIter, _ := cmd.Flags().GetInt("max-iterations")
 
 	if discuss && st.JSON {
 		discuss = false // interactive handoff is meaningless under --json
@@ -77,22 +77,22 @@ func runDeliver(cmd *cobra.Command, args []string) error {
 		Agent:     ag,
 		Forge:     fg,
 		Runner:    pipeline.NewRunner(pcfg, a.Log),
-		Notifier:  notify.New(a.Cfg.Notifications, a.Log),
+		Sessions:  a.Sessions,
+		Self:      self,
 		Repo:      a.Repo,
 		RepoRoot:  a.Paths.RepoRoot,
 		Log:       a.Log,
 	}, deliver.Options{
-		Idea:                 strings.Join(args, " "),
-		Base:                 base,
-		Model:                model,
-		Design:               design,
-		Discuss:              discuss,
-		Draft:                draft,
-		Reviewers:            reviewers,
-		MaxFixAttempts:       maxFix,
-		Babysit:              doBabysit,
-		BabysitInterval:      interval,
-		BabysitMaxIterations: maxIter,
+		Idea:            strings.Join(args, " "),
+		Base:            base,
+		Model:           model,
+		Design:          design,
+		Discuss:         discuss,
+		Draft:           draft,
+		Reviewers:       reviewers,
+		MaxFixAttempts:  maxFix,
+		Babysit:         doBabysit,
+		BabysitInterval: interval,
 	})
 	if err != nil {
 		return err
@@ -114,10 +114,8 @@ func runDeliver(cmd *cobra.Command, args []string) error {
 		if res.PRURL != "" {
 			fmt.Fprintf(&b, "  PR:     %s\n", res.PRURL)
 		}
-		if res.Babysat {
-			b.WriteString("  babysit finished (PR resolved, merged/closed, or watch budget reached)")
-		} else if res.PRURL != "" {
-			fmt.Fprintf(&b, "  next:   shepherd babysit %s", prNumberFromURL(res.PRURL))
+		if res.BabysitSession != "" {
+			fmt.Fprintf(&b, "  watch:  babysitting as %q — runs until you merge or `shepherd stop %s`", res.BabysitSession, res.BabysitSession)
 		}
 		return strings.TrimRight(b.String(), "\n")
 	})
@@ -133,11 +131,4 @@ func deliverHeadline(idea string) string {
 		idea = strings.TrimSpace(idea[:72]) + "…"
 	}
 	return idea
-}
-
-func prNumberFromURL(url string) string {
-	if i := strings.LastIndex(url, "/"); i >= 0 && i+1 < len(url) {
-		return "#" + url[i+1:]
-	}
-	return url
 }
