@@ -6,17 +6,17 @@ import (
 	"testing"
 )
 
-func TestVersionLine(t *testing.T) {
+func TestRenderVersion(t *testing.T) {
 	const v = "1.2.3"
 
 	t.Run("short prints only the bare version string", func(t *testing.T) {
-		if got := versionLine(true, v); got != v {
-			t.Fatalf("versionLine(true, %q) = %q, want %q", v, got, v)
+		if got := renderVersion(true, v); got != v {
+			t.Fatalf("renderVersion(true, %q) = %q, want %q", v, got, v)
 		}
 	})
 
 	t.Run("long form includes the runtime info", func(t *testing.T) {
-		got := versionLine(false, v)
+		got := renderVersion(false, v)
 		if !strings.HasPrefix(got, "shepherd "+v) {
 			t.Errorf("long form = %q, want prefix %q", got, "shepherd "+v)
 		}
