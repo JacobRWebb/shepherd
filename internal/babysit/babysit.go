@@ -55,7 +55,30 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	backoff := o.Interval
 	fixes := 0
 	notifiedGreen := false
-	processed := map[string]bool{} // review-comment IDs already handled
+	processed := map[string]bool{} // review-comment keys already handled
+
+	// Seed already-handled feedback: any comment at or before our most recent
+	// reply is treated as done, so a (re)start never re-handles old comments and
+	// posts duplicate replies. Feedback newer than the last reply — or on a PR we
+	// have never replied to — is left to be addressed.
+	if existing, lerr := d.Forge.ListComments(ctx, d.Repo, o.PR); lerr == nil {
+		var lastReply time.Time
+		for _, c := range existing {
+			if isShepherdComment(c) && c.CreatedAt.After(lastReply) {
+				lastReply = c.CreatedAt
+			}
+		}
+		seeded := 0
+		for _, c := range existing {
+			if !c.CreatedAt.IsZero() && !c.CreatedAt.After(lastReply) {
+				processed[commentKey(c)] = true
+				seeded++
+			}
+		}
+		if seeded > 0 {
+			d.Log.Info().Int("pr", o.PR).Int("seen", seeded).Msg("babysit: prior feedback already addressed; watching for new feedback")
+		}
+	}
 
 	for iter := 0; o.MaxIterations <= 0 || iter < o.MaxIterations; iter++ {
 		pr, err := d.Forge.GetPR(ctx, d.Repo, o.PR)
