@@ -1,0 +1,31 @@
+# Shepherd configuration for the Shepherd repo (dogfooding its own tool).
+# Env overrides use SHEPHERD_ with __ for nesting, e.g. SHEPHERD_CLAUDE__MODEL=opus.
+version: 1
+
+worktrees:
+  root: "../.shepherd-worktrees"
+  branch_prefix: "shepherd/"
+  base_branch: "" # repo default branch (origin/HEAD)
+  auto_cleanup: true
+
+forge:
+  provider: github
+
+session:
+  backend: auto # tmux when available (Linux/macOS/WSL), else native
+
+claude:
+  permission_mode: default
+
+# The clean push gate: shepherd ship runs these in the worktree before pushing.
+validation:
+  stop_on_failure: true
+  default_timeout: "10m"
+  steps:
+    - { name: build, run: "go build ./..." }
+    - { name: test, run: "go test ./..." }
+    - { name: vet, run: "go vet ./..." }
+
+logging:
+  level: info
+  format: console
