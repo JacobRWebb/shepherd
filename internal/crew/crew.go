@@ -16,16 +16,23 @@ import (
 
 	"github.com/JacobRWebb/shepherd/internal/agent"
 	"github.com/JacobRWebb/shepherd/internal/domain"
+	"github.com/JacobRWebb/shepherd/internal/forge"
 	"github.com/JacobRWebb/shepherd/internal/gitutil"
+	"github.com/JacobRWebb/shepherd/internal/pipeline"
 	"github.com/JacobRWebb/shepherd/internal/session"
+	"github.com/JacobRWebb/shepherd/internal/ship"
 	"github.com/JacobRWebb/shepherd/internal/worktree"
 )
 
-// Deps are crew's collaborators.
+// Deps are crew's collaborators. Forge and Runner are only needed when
+// Options.Ship is set.
 type Deps struct {
 	Worktrees worktree.Manager
 	Sessions  session.SessionBackend
 	Agent     agent.Launcher
+	Forge     forge.Forge
+	Runner    *pipeline.Runner
+	Repo      domain.Repo
 	RepoRoot  string
 	Log       *zerolog.Logger
 }
@@ -39,6 +46,14 @@ type Options struct {
 	Model       string
 	Detach      bool
 	Keep        bool
+
+	// Ship, when set, runs each finished agent's validation gate and opens its
+	// own PR (one PR per agent). The remaining fields tune that per-agent ship.
+	Ship           bool
+	Draft          bool
+	AutoFix        bool
+	MaxFixAttempts int
+	Reviewers      []string
 }
 
 // Task is one planned subtask.
@@ -58,6 +73,10 @@ type AgentOutcome struct {
 	ExitCode *int   `json:"exit_code,omitempty"`
 	Summary  string `json:"summary,omitempty"`
 	DiffStat string `json:"diffstat,omitempty"`
+
+	Shipped   bool   `json:"shipped,omitempty"`
+	PRURL     string `json:"pr_url,omitempty"`
+	ShipError string `json:"ship_error,omitempty"`
 }
 
 // Result is the crew run outcome.
@@ -174,7 +193,67 @@ monitor:
 		out.DiffStat = diffStat(ctx, lv.wt.Path)
 		res.Agents = append(res.Agents, out)
 	}
+
+	if o.Ship && !interrupted {
+		shipCrew(ctx, d, o, res.CrewID, res.Agents)
+	}
 	return res, nil
+}
+
+// shipCrew runs each finished agent's gate and opens a PR for it, one per agent.
+// It mutates the AgentOutcome slice in place. Failures are recorded per agent
+// and never abort the others.
+func shipCrew(ctx context.Context, d Deps, o Options, crewID string, agents []AgentOutcome) {
+	for i := range agents {
+		a := &agents[i]
+		if a.DiffStat == "" {
+			a.ShipError = "no changes produced"
+			continue
+		}
+		if d.Forge == nil || d.Runner == nil {
+			a.ShipError = "ship requires a configured forge and validation runner"
+			continue
+		}
+		d.Log.Info().Str("agent", a.Name).Str("branch", a.Branch).Msg("crew shipping agent")
+		sres, err := ship.Run(ctx, ship.Deps{
+			Worktrees: d.Worktrees,
+			Forge:     d.Forge,
+			Agent:     d.Agent,
+			Runner:    d.Runner,
+			Repo:      d.Repo,
+			RepoRoot:  d.RepoRoot,
+			Log:       d.Log,
+		}, ship.Options{
+			Target:         a.Branch,
+			Base:           o.Base,
+			Title:          a.Task.Title,
+			Body:           crewPRBody(crewID, a),
+			Draft:          o.Draft,
+			AutoFix:        o.AutoFix,
+			MaxFixAttempts: o.MaxFixAttempts,
+			Reviewers:      o.Reviewers,
+		})
+		if err != nil {
+			a.ShipError = err.Error()
+			continue
+		}
+		a.Shipped = sres.Pushed
+		if sres.PR != nil {
+			a.PRURL = sres.PR.URL
+		}
+	}
+}
+
+func crewPRBody(crewID string, a *AgentOutcome) string {
+	var b strings.Builder
+	if d := strings.TrimSpace(a.Task.Description); d != "" {
+		fmt.Fprintf(&b, "%s\n\n", d)
+	}
+	if a.Summary != "" {
+		fmt.Fprintf(&b, "%s\n\n", a.Summary)
+	}
+	fmt.Fprintf(&b, "Part of shepherd crew %s.", crewID)
+	return b.String()
 }
 
 func planTasks(ctx context.Context, d Deps, o Options) ([]Task, error) {
