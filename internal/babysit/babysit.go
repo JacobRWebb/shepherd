@@ -47,6 +47,11 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	if o.Interval <= 0 {
 		o.Interval = 30 * time.Second
 	}
+	if d.Log == nil {
+		l := zerolog.Nop()
+		d.Log = &l
+	}
+	d.Log.Info().Int("pr", o.PR).Dur("interval", o.Interval).Bool("auto_fix", o.AutoFix).Msg("babysit: watching")
 	backoff := o.Interval
 	fixes := 0
 	notifiedGreen := false
@@ -72,10 +77,12 @@ func Run(ctx context.Context, d Deps, o Options) error {
 			case !safeToFix(pr):
 				d.notify(ctx, "warn", fmt.Sprintf("PR #%d feedback needs a human (PR is conflicted)", pr.Number), feedbackTitles(fresh), pr.URL, nil)
 			default:
+				d.Log.Info().Int("pr", pr.Number).Int("comments", len(fresh)).Str("feedback", feedbackTitles(fresh)).Msg("babysit: new review feedback — reconciling")
 				fixes++
 				if err := d.reconcileFeedback(ctx, pr, fresh); err != nil {
 					d.notify(ctx, "error", fmt.Sprintf("reconciling feedback on PR #%d failed", pr.Number), err.Error(), pr.URL, nil)
 				} else {
+					d.Log.Info().Int("pr", pr.Number).Msg("babysit: pushed an update addressing review feedback")
 					notifiedGreen = false
 					backoff = o.Interval
 					if !sleep(ctx, backoff) {
@@ -88,6 +95,7 @@ func Run(ctx context.Context, d Deps, o Options) error {
 
 		checks, _ := d.Forge.ListChecks(ctx, d.Repo, o.PR)
 		sum := domain.Summarize(checks)
+		d.Log.Info().Int("pr", pr.Number).Bool("all_pass", sum.AllPass).Int("pending", sum.Pending).Bool("failing", sum.AnyFail).Msg("babysit: checked PR")
 
 		switch {
 		case sum.AllPass:
@@ -102,6 +110,7 @@ func Run(ctx context.Context, d Deps, o Options) error {
 			if !sleep(ctx, backoff) {
 				return ctx.Err()
 			}
+			backoff = capDur(backoff*3/2, 5*time.Minute) // green & idle: ease off polling
 
 		case sum.Pending > 0 && !sum.AnyFail:
 			notifiedGreen = false
@@ -118,6 +127,7 @@ func Run(ctx context.Context, d Deps, o Options) error {
 					"failing: "+failedNames(sum), pr.URL, sum.Failed)
 				return nil
 			}
+			d.Log.Info().Int("pr", pr.Number).Str("failing", failedNames(sum)).Msg("babysit: fixing failing checks")
 			fixes++
 			if err := d.attemptFix(ctx, pr, sum); err != nil {
 				d.notify(ctx, "error", fmt.Sprintf("auto-fix for PR #%d failed", pr.Number), err.Error(), pr.URL, nil)
