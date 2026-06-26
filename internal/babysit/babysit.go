@@ -102,9 +102,12 @@ func Run(ctx context.Context, d Deps, o Options) error {
 			default:
 				d.Log.Info().Int("pr", pr.Number).Int("comments", len(fresh)).Str("feedback", feedbackTitles(fresh)).Msg("babysit: new review feedback — reconciling")
 				fixes++
-				if err := d.reconcileFeedback(ctx, pr, fresh); err != nil {
+				if replyKey, err := d.reconcileFeedback(ctx, pr, fresh); err != nil {
 					d.notify(ctx, "error", fmt.Sprintf("reconciling feedback on PR #%d failed", pr.Number), err.Error(), pr.URL, nil)
 				} else {
+					if replyKey != "" {
+						processed[replyKey] = true // never treat our own reply as new feedback
+					}
 					d.Log.Info().Int("pr", pr.Number).Msg("babysit: pushed an update addressing review feedback")
 					notifiedGreen = false
 					backoff = o.Interval
@@ -156,8 +159,10 @@ func Run(ctx context.Context, d Deps, o Options) error {
 				d.notify(ctx, "error", fmt.Sprintf("auto-fix for PR #%d failed", pr.Number), err.Error(), pr.URL, nil)
 				return err
 			}
-			_, _ = d.Forge.PostComment(ctx, d.Repo, o.PR,
-				"🐑 shepherd pushed an automated fix for failing checks ("+failedNames(sum)+"). Watching the new run.")
+			if reply, perr := d.Forge.PostComment(ctx, d.Repo, o.PR,
+				"🐑 shepherd pushed an automated fix for failing checks ("+failedNames(sum)+"). Watching the new run."); perr == nil {
+				processed[commentKey(reply)] = true // don't react to our own fix note
+			}
 			backoff = o.Interval
 
 		default:
@@ -244,61 +249,64 @@ func (d Deps) freshFeedback(ctx context.Context, pr domain.PullRequest, processe
 }
 
 // commentKey is a stable identity for a comment used to handle it at most once.
-// It prefers the provider ID, then the URL, then the content — so a comment is
-// never silently dropped just because a provider omitted an ID.
+// It prefers the URL because that is stable between posting a comment (PostComment
+// returns the URL) and re-fetching it later — so shepherd can mark its own replies
+// handled the instant it posts them and never react to them as feedback.
 func commentKey(c domain.Comment) string {
-	if c.ID != "" {
-		return c.ID
-	}
 	if c.URL != "" {
 		return c.URL
+	}
+	if c.ID != "" {
+		return c.ID
 	}
 	return c.Author + "|" + c.CreatedAt.String() + "|" + c.Body
 }
 
 // reconcileFeedback asks the agent to assess each point of feedback, implement
-// the valid ones (and self-verify), then replies on the PR with what it did.
-func (d Deps) reconcileFeedback(ctx context.Context, pr domain.PullRequest, fresh []domain.Comment) error {
+// the valid ones (and self-verify), then replies on the PR with what it did. It
+// returns the key of the reply it posted so the caller can mark it handled (so
+// the watcher never reacts to its own summary).
+func (d Deps) reconcileFeedback(ctx context.Context, pr domain.PullRequest, fresh []domain.Comment) (string, error) {
 	if d.Agent == nil {
-		return domain.InvalidInputf("reconciling feedback requires the claude CLI")
+		return "", domain.InvalidInputf("reconciling feedback requires the claude CLI")
 	}
 	wt, err := d.Worktrees.Get(ctx, pr.HeadRef)
 	if err != nil {
-		return fmt.Errorf("no local worktree for branch %q to reconcile in (run `shepherd new` for it first): %w", pr.HeadRef, err)
+		return "", fmt.Errorf("no local worktree for branch %q to reconcile in (run `shepherd new` for it first): %w", pr.HeadRef, err)
 	}
 	res, err := d.Agent.Headless(ctx, wt, agent.HeadlessSpec{
 		Spec:         agent.Spec{Prompt: feedbackPrompt(pr, fresh), PermissionMode: agent.PermissionBypass},
 		OutputFormat: "json",
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	reply := strings.TrimSpace(res.Text)
 
 	if clean, _ := gitutil.IsClean(ctx, wt.Path); !clean {
 		if out, err := gitutil.Exec(ctx, wt.Path, "add", "-A"); err != nil {
-			return fmt.Errorf("git add: %v: %s", err, out)
+			return "", fmt.Errorf("git add: %v: %s", err, out)
 		}
 		if out, err := gitutil.Exec(ctx, wt.Path, "commit", "-m", "shepherd: address review feedback"); err != nil {
-			return fmt.Errorf("git commit: %v: %s", err, out)
+			return "", fmt.Errorf("git commit: %v: %s", err, out)
 		}
 		if out, err := gitutil.Exec(ctx, wt.Path, "push"); err != nil {
-			return fmt.Errorf("git push: %v: %s", err, out)
+			return "", fmt.Errorf("git push: %v: %s", err, out)
 		}
 		body := "🐑 shepherd addressed the review feedback and pushed an update."
 		if reply != "" {
 			body += "\n\n" + clip(reply, 1500)
 		}
-		_, _ = d.Forge.PostComment(ctx, d.Repo, pr.Number, body)
-		return nil
+		posted, _ := d.Forge.PostComment(ctx, d.Repo, pr.Number, body)
+		return commentKey(posted), nil
 	}
 
 	body := "🐑 shepherd reviewed the feedback; no code change was needed."
 	if reply != "" {
 		body += "\n\n" + clip(reply, 1500)
 	}
-	_, _ = d.Forge.PostComment(ctx, d.Repo, pr.Number, body)
-	return nil
+	posted, _ := d.Forge.PostComment(ctx, d.Repo, pr.Number, body)
+	return commentKey(posted), nil
 }
 
 func feedbackPrompt(pr domain.PullRequest, comments []domain.Comment) string {

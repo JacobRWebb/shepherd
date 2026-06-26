@@ -60,6 +60,23 @@ func TestFreshFeedbackSkipsOwnAndDedupes(t *testing.T) {
 	}
 }
 
+func TestFreshFeedbackSkipsMarkedReply(t *testing.T) {
+	// Simulate shepherd having posted a reply and marked it processed by URL key;
+	// freshFeedback must not surface it as feedback even on a fresh fetch.
+	reply := domain.Comment{URL: "https://x/pull/3#issuecomment-9", Author: "JacobRWebb", Body: "🐑 shepherd addressed the feedback"}
+	fake := &fakeForge{comments: []domain.Comment{
+		{URL: "https://x/pull/3#issuecomment-1", Author: "bob", Body: "do X"},
+		reply,
+	}}
+	d := Deps{Forge: fake, Repo: domain.Repo{Owner: "o", Name: "r"}}
+	processed := map[string]bool{commentKey(reply): true}
+
+	fresh := d.freshFeedback(context.Background(), domain.PullRequest{Number: 3}, processed)
+	if len(fresh) != 1 || fresh[0].Body != "do X" {
+		t.Fatalf("expected only bob's comment, got %+v", fresh)
+	}
+}
+
 func TestIsShepherdComment(t *testing.T) {
 	if !isShepherdComment(domain.Comment{Body: "🐑 shepherd did a thing"}) {
 		t.Fatal("expected shepherd comment to be detected")
