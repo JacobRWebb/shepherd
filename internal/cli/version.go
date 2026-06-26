@@ -31,8 +31,6 @@ func effectiveVersion() string {
 	return version
 }
 
-// renderVersion renders the human-readable version output. When short is true it
-// returns only the bare version string; otherwise the full build/runtime line.
 func renderVersion(short bool, v string) string {
 	if short {
 		return v
