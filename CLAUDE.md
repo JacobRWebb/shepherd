@@ -106,6 +106,9 @@ GOOS=linux go build ./...   # validate the unix-tagged session files
   `go mod tidy` only once code imports it (mid-build tidies prune unused pins).
 - Resolve external binaries via `exec.LookPath` (PATHEXT-aware); wrap `.cmd`/`.bat`
   shims through `cmd.exe /c` on Windows.
+- **Commit attribution:** never add a `Co-Authored-By: Claude …` trailer and never
+  set the author/committer to a Claude/Anthropic identity. Commits are the maintainer's
+  alone. This applies to commits Shepherd itself makes (ship/babysit/crew) as well.
 
 ## Decision log
 
@@ -116,3 +119,5 @@ GOOS=linux go build ./...   # validate the unix-tagged session files
   Basic auth), since app passwords were retired (June 9 2026).
 - _2026-06-26_ — Implemented the tmux session backend alongside native (native is the
   default on Windows; `auto` prefers tmux on non-Windows when present).
+- _2026-06-26_ — Stripped `Co-Authored-By: Claude` trailers from history and adopted a
+  no-AI-attribution rule for all commits (human author only).
