@@ -34,8 +34,9 @@ internal/
   forge/              Forge interface + factory; github/ (gh CLI), bitbucket/ (REST)
   pipeline/           validation steps + Gate (the clean push gate)
   ship/               validate → push → open PR (+ bounded auto-fix)
-  babysit/            poll CI → auto-fix safe failures → notify
-  crew/               plan → fan out agents → monitor → collect
+  babysit/            poll CI → auto-fix safe failures → reconcile review feedback → notify
+  crew/               plan → fan out agents → monitor → collect (+ --ship: one PR/agent)
+  deliver/            the full loop: design → worktree → implement → ship → babysit
   tui/                Bubble Tea dashboard + log viewer
   notify/             terminal / webhook / command notifiers
   output/             dual human/JSON result writer (stdout); exit-code mapping
@@ -121,3 +122,9 @@ GOOS=linux go build ./...   # validate the unix-tagged session files
   default on Windows; `auto` prefers tmux on non-Windows when present).
 - _2026-06-26_ — Stripped `Co-Authored-By: Claude` trailers from history and adopted a
   no-AI-attribution rule for all commits (human author only).
+- _2026-06-26_ — Built the autonomous delivery loop. Unattended agents (crew/ship/
+  babysit auto-fix, deliver) run with `bypassPermissions` (new `agent.PermissionBypass`)
+  so they can run build/test and self-verify; crew streams `stream-json` for live logs.
+  `crew --ship` opens one PR per agent; `babysit` reconciles human review feedback
+  (judge → implement valid points → reply, never merges); `deliver "<idea>"` chains
+  design → implement → gate(auto-fix) → PR → babysit. Two human touchpoints: idea, merge.

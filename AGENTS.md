@@ -29,6 +29,14 @@ The `error.code` field mirrors these: `invalid_input`, `not_found`, `conflict`,
 
 ## Recipes
 
+Deliver an idea end to end — design, implement, test, open a PR, and babysit it to merge:
+```sh
+shepherd deliver "add a /healthz endpoint" --json
+# => data.{branch, plan, pr_url, ship.gate_passed, babysat}
+# Two human touchpoints only: the idea (here) and the merge/review at the end.
+# --babysit=false stops after opening the PR; --discuss adds interactive planning.
+```
+
 Create an isolated workspace and run an agent to completion:
 ```sh
 shepherd new "#123" --headless --json
@@ -53,15 +61,19 @@ shepherd ship <branch> --auto-fix --json
 # => data.pushed, data.pr.{number,url,state}, data.fix_attempts
 ```
 
-Fan out parallel agents:
+Fan out parallel agents, each shipping its own PR:
 ```sh
-shepherd crew "migrate to the new API" -n 4 --json
-# => data.crew_id, data.agents[].{task,branch,state,summary,diffstat}
+shepherd crew "migrate to the new API" -n 4 --ship --json
+# => data.crew_id, data.agents[].{task,branch,state,summary,diffstat,pr_url}
+# Without --ship, worktrees are left in place for a manual `shepherd ship <branch>`.
 ```
 
-Keep a PR green:
+Keep a PR green and reconcile review feedback:
 ```sh
 shepherd babysit 42 --json
+# Polls CI, auto-fixes safe failures, and reads new human review comments:
+# it asks the agent to judge each point, implements the valid ones, pushes,
+# and replies. It never merges — that stays with you.
 ```
 
 Inspect everything:
@@ -78,8 +90,11 @@ shepherd update                  # install the latest release over this binary
 
 ## Notes
 
-- `new`/`crew` require the `claude` CLI; `ship`/`babysit` PRs require a configured
-  forge (`gh` for GitHub, env-provided API token for Bitbucket).
+- `new`/`crew`/`deliver` require the `claude` CLI; `ship`/`babysit`/`deliver` PRs
+  require a configured forge (`gh` for GitHub, env-provided API token for Bitbucket).
+- `deliver` and `crew --ship` run unattended agents with `bypassPermissions` inside
+  isolated worktrees so they can run build/test and self-verify; they never touch
+  the main working tree.
 - A non-numeric issue ref on GitHub returns `unsupported`; treat the arg as a
   branch name instead.
 - `--json` implies headless for `new` (no interactive terminal takeover).

@@ -51,12 +51,13 @@ tmux is optional (used by the tmux session backend on Linux/macOS/WSL).
 
 ```sh
 shepherd init                       # scaffold .shepherd.yaml + the Claude skill
+shepherd deliver "add a /healthz endpoint"  # the whole loop: design→PR→merge, hands-off
 shepherd new "fix the login timeout" # worktree + interactive agent
 shepherd new "#123" --headless      # worktree + autonomous agent, from an issue
 shepherd ship <branch> --no-push    # run the validation gate (dry run)
 shepherd ship <branch>              # validate, push, open a PR
-shepherd crew "refactor billing" -n 3   # 3 parallel agents, one worktree each
-shepherd babysit 42                 # watch PR #42's CI, auto-fix safe failures
+shepherd crew "refactor billing" -n 3 --ship  # 3 parallel agents, each opens its own PR
+shepherd babysit 42                 # watch PR #42's CI + reconcile review feedback
 shepherd status                     # list worktrees, sessions, PRs
 shepherd                            # interactive dashboard (TUI)
 ```
@@ -65,11 +66,12 @@ shepherd                            # interactive dashboard (TUI)
 
 | Command | Purpose |
 |---|---|
+| `deliver <idea>` | The full loop for one idea: design → implement → test → PR → babysit to merge |
 | `init` | Scaffold `.shepherd.yaml`, the skill, and optional git hooks |
 | `new <issue-or-task>` | Create a worktree and launch an agent (interactive or `--headless`) |
-| `crew <description>` | Decompose work into N parallel agents, one worktree each |
+| `crew <description>` | Decompose work into N parallel agents, one worktree each (`--ship` = one PR each) |
 | `ship <branch-or-task>` | Run the validation gate, push, open a PR (`--auto-fix` to self-heal) |
-| `babysit <pr-number>` | Watch CI, auto-fix safe failures, notify on the rest |
+| `babysit <pr-number>` | Watch CI, auto-fix safe failures, reconcile review feedback, notify on the rest |
 | `status` | Show worktrees, sessions, and PRs (`--prs`, `--prune`) |
 | `update` | Self-update to the latest release (`--check` to only check) |
 | `tui` (or no args) | Interactive dashboard |
