@@ -12,6 +12,7 @@ import (
 
 	"github.com/JacobRWebb/shepherd/internal/config"
 	"github.com/JacobRWebb/shepherd/internal/gitutil"
+	"github.com/JacobRWebb/shepherd/internal/sysproc"
 )
 
 func newInitCmd() *cobra.Command {
@@ -68,7 +69,9 @@ func runInit(ctx context.Context, o initOpts) (initResult, error) {
 	if err != nil {
 		cwd, _ := os.Getwd()
 		if o.gitInit {
-			if gerr := exec.CommandContext(ctx, "git", "init", "-b", "main").Run(); gerr != nil {
+			gitInitCmd := exec.CommandContext(ctx, "git", "init", "-b", "main")
+			sysproc.Hide(gitInitCmd)
+			if gerr := gitInitCmd.Run(); gerr != nil {
 				return res, fmt.Errorf("git init: %w", gerr)
 			}
 		}

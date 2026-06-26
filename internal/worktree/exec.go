@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os/exec"
 	"time"
+
+	"github.com/JacobRWebb/shepherd/internal/sysproc"
 )
 
 // ExecResult is the captured outcome of a command run in (or for) a worktree.
@@ -22,6 +24,7 @@ func run(ctx context.Context, dir, name string, args ...string) (ExecResult, err
 	start := time.Now()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
+	sysproc.Hide(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/JacobRWebb/shepherd/internal/domain"
+	"github.com/JacobRWebb/shepherd/internal/sysproc"
 )
 
 // resolveBinary finds the claude executable. An explicit path (containing a
@@ -33,10 +34,14 @@ func resolveBinary(binary string) (string, error) {
 // command builds a context-bound *exec.Cmd for the resolved binary. On Windows a
 // .cmd/.bat shim is executed through cmd.exe; a real .exe is invoked directly.
 func command(ctx context.Context, bin string, args ...string) *exec.Cmd {
+	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" && isShim(bin) {
-		return exec.CommandContext(ctx, "cmd.exe", append([]string{"/c", bin}, args...)...)
+		cmd = exec.CommandContext(ctx, "cmd.exe", append([]string{"/c", bin}, args...)...)
+	} else {
+		cmd = exec.CommandContext(ctx, bin, args...)
 	}
-	return exec.CommandContext(ctx, bin, args...)
+	sysproc.Hide(cmd) // headless claude must never flash a console window
+	return cmd
 }
 
 // commandPlain is like command but NOT bound to a context, used for interactive

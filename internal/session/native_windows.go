@@ -12,11 +12,15 @@ import (
 
 const stillActive = 259 // STILL_ACTIVE
 
-// configureDetached makes the child its own process group with no inherited
-// console, so it survives shepherd exiting and can be tree-killed.
+// configureDetached makes the child its own process group with a hidden console,
+// so it survives shepherd exiting, can be tree-killed, and never flashes a
+// terminal window. CREATE_NO_WINDOW (rather than DETACHED_PROCESS) gives the
+// child a hidden console that its own children inherit, so descendants don't
+// flash either.
 func configureDetached(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.DETACHED_PROCESS,
+		HideWindow:    true,
+		CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_NO_WINDOW,
 	}
 }
 
@@ -43,5 +47,7 @@ func killTree(pid int, force bool) error {
 	if force {
 		args = append(args, "/F")
 	}
-	return exec.Command("taskkill", args...).Run()
+	cmd := exec.Command("taskkill", args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
+	return cmd.Run()
 }

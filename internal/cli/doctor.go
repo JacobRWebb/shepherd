@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/JacobRWebb/shepherd/internal/config"
+	"github.com/JacobRWebb/shepherd/internal/sysproc"
 )
 
 // toolReport captures the result of probing one external CLI on PATH.
@@ -157,7 +158,9 @@ func probeTool(ctx context.Context, spec toolSpec) toolReport {
 	tr.Found = true
 	tr.Path = path
 
-	out, verr := exec.CommandContext(ctx, path, spec.versionArgs...).CombinedOutput()
+	vcmd := exec.CommandContext(ctx, path, spec.versionArgs...)
+	sysproc.Hide(vcmd)
+	out, verr := vcmd.CombinedOutput()
 	if verr != nil {
 		tr.Error = verr.Error()
 		if v := firstLine(string(out)); v != "" {
@@ -210,7 +213,9 @@ func checkGHAuth(ctx context.Context) ghAuthReport {
 	if err != nil {
 		return ghAuthReport{Available: false, Detail: "gh not found on PATH"}
 	}
-	out, runErr := exec.CommandContext(ctx, path, "auth", "status").CombinedOutput()
+	acmd := exec.CommandContext(ctx, path, "auth", "status")
+	sysproc.Hide(acmd)
+	out, runErr := acmd.CombinedOutput()
 	detail := firstLine(string(out))
 	if runErr != nil {
 		if detail == "" {

@@ -17,6 +17,7 @@ import (
 
 	"github.com/JacobRWebb/shepherd/internal/config"
 	"github.com/JacobRWebb/shepherd/internal/domain"
+	"github.com/JacobRWebb/shepherd/internal/sysproc"
 )
 
 // Step is one validation command.
@@ -174,6 +175,7 @@ func (r *Runner) runStep(ctx context.Context, dir string, step Step) StepResult 
 
 	name, args := shellCommand(step.Run)
 	cmd := exec.CommandContext(cctx, name, args...)
+	sysproc.Hide(cmd)
 	wd := dir
 	if step.WorkdirRel != "" {
 		wd = filepath.Join(dir, step.WorkdirRel)

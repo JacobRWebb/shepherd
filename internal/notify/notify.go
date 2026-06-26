@@ -18,6 +18,7 @@ import (
 
 	"github.com/JacobRWebb/shepherd/internal/config"
 	"github.com/JacobRWebb/shepherd/internal/domain"
+	"github.com/JacobRWebb/shepherd/internal/sysproc"
 )
 
 // Event is one notification.
@@ -128,6 +129,7 @@ func (c *command) Notify(ctx context.Context, e Event) error {
 	name, args := shellCommand(c.cmdline)
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin = bytes.NewReader(b)
+	sysproc.Hide(cmd)
 	return cmd.Run()
 }
 
