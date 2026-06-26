@@ -49,6 +49,7 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	backoff := o.Interval
 	fixes := 0
 	notifiedGreen := false
+	processed := map[string]bool{} // review-comment IDs already handled
 
 	for iter := 0; iter < o.MaxIterations; iter++ {
 		pr, err := d.Forge.GetPR(ctx, d.Repo, o.PR)
@@ -58,6 +59,30 @@ func Run(ctx context.Context, d Deps, o Options) error {
 		if pr.State != domain.PRStateOpen {
 			d.notify(ctx, "info", fmt.Sprintf("PR #%d is %s", pr.Number, pr.State), "", pr.URL, nil)
 			return nil
+		}
+
+		// Review feedback: reconcile new human comments before looking at CI.
+		if fresh := d.freshFeedback(ctx, pr, processed); len(fresh) > 0 {
+			switch {
+			case !o.AutoFix:
+				d.notify(ctx, "info", fmt.Sprintf("PR #%d has new review feedback", pr.Number), feedbackTitles(fresh), pr.URL, nil)
+			case fixes >= o.MaxFixAttempts:
+				d.notify(ctx, "warn", fmt.Sprintf("PR #%d has new feedback but the fix budget is exhausted", pr.Number), feedbackTitles(fresh), pr.URL, nil)
+			case !safeToFix(pr):
+				d.notify(ctx, "warn", fmt.Sprintf("PR #%d feedback needs a human (PR is conflicted)", pr.Number), feedbackTitles(fresh), pr.URL, nil)
+			default:
+				fixes++
+				if err := d.reconcileFeedback(ctx, pr, fresh); err != nil {
+					d.notify(ctx, "error", fmt.Sprintf("reconciling feedback on PR #%d failed", pr.Number), err.Error(), pr.URL, nil)
+				} else {
+					notifiedGreen = false
+					backoff = o.Interval
+					if !sleep(ctx, backoff) {
+						return ctx.Err()
+					}
+					continue
+				}
+			}
 		}
 
 		checks, _ := d.Forge.ListChecks(ctx, d.Repo, o.PR)
@@ -153,6 +178,118 @@ func (d Deps) attemptFix(ctx context.Context, pr domain.PullRequest, sum domain.
 		return fmt.Errorf("git push: %v: %s", err, out)
 	}
 	return nil
+}
+
+// freshFeedback returns human review comments not yet handled, marking every
+// comment it inspects as processed so each is surfaced at most once. Shepherd's
+// own replies (tagged with 🐑) are skipped — necessary because gh posts them as
+// the authenticated user, so they are indistinguishable by author.
+func (d Deps) freshFeedback(ctx context.Context, pr domain.PullRequest, processed map[string]bool) []domain.Comment {
+	comments, err := d.Forge.ListComments(ctx, d.Repo, pr.Number)
+	if err != nil {
+		return nil
+	}
+	var fresh []domain.Comment
+	for _, c := range comments {
+		if c.ID == "" || processed[c.ID] {
+			continue
+		}
+		processed[c.ID] = true
+		if isShepherdComment(c) || strings.TrimSpace(c.Body) == "" {
+			continue
+		}
+		fresh = append(fresh, c)
+	}
+	return fresh
+}
+
+// reconcileFeedback asks the agent to assess each point of feedback, implement
+// the valid ones (and self-verify), then replies on the PR with what it did.
+func (d Deps) reconcileFeedback(ctx context.Context, pr domain.PullRequest, fresh []domain.Comment) error {
+	if d.Agent == nil {
+		return domain.InvalidInputf("reconciling feedback requires the claude CLI")
+	}
+	wt, err := d.Worktrees.Get(ctx, pr.HeadRef)
+	if err != nil {
+		return fmt.Errorf("no local worktree for branch %q to reconcile in (run `shepherd new` for it first): %w", pr.HeadRef, err)
+	}
+	res, err := d.Agent.Headless(ctx, wt, agent.HeadlessSpec{
+		Spec:         agent.Spec{Prompt: feedbackPrompt(pr, fresh), PermissionMode: agent.PermissionBypass},
+		OutputFormat: "json",
+	})
+	if err != nil {
+		return err
+	}
+	reply := strings.TrimSpace(res.Text)
+
+	if clean, _ := gitutil.IsClean(ctx, wt.Path); !clean {
+		if out, err := gitutil.Exec(ctx, wt.Path, "add", "-A"); err != nil {
+			return fmt.Errorf("git add: %v: %s", err, out)
+		}
+		if out, err := gitutil.Exec(ctx, wt.Path, "commit", "-m", "shepherd: address review feedback"); err != nil {
+			return fmt.Errorf("git commit: %v: %s", err, out)
+		}
+		if out, err := gitutil.Exec(ctx, wt.Path, "push"); err != nil {
+			return fmt.Errorf("git push: %v: %s", err, out)
+		}
+		body := "🐑 shepherd addressed the review feedback and pushed an update."
+		if reply != "" {
+			body += "\n\n" + clip(reply, 1500)
+		}
+		_, _ = d.Forge.PostComment(ctx, d.Repo, pr.Number, body)
+		return nil
+	}
+
+	body := "🐑 shepherd reviewed the feedback; no code change was needed."
+	if reply != "" {
+		body += "\n\n" + clip(reply, 1500)
+	}
+	_, _ = d.Forge.PostComment(ctx, d.Repo, pr.Number, body)
+	return nil
+}
+
+func feedbackPrompt(pr domain.PullRequest, comments []domain.Comment) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are addressing reviewer feedback on pull request #%d (%q) from inside its worktree.\n\n", pr.Number, pr.Title)
+	b.WriteString("Feedback:\n")
+	for _, c := range comments {
+		if c.Path != "" {
+			fmt.Fprintf(&b, "- [%s:%d] %s\n", c.Path, c.Line, oneLine(c.Body))
+		} else {
+			fmt.Fprintf(&b, "- %s\n", oneLine(c.Body))
+		}
+	}
+	b.WriteString("\nFor each point, decide whether it is correct and worth doing. " +
+		"If it is, make the change here and re-run the relevant build/test commands to confirm everything still passes. " +
+		"If you disagree with a point, leave the code unchanged for it. " +
+		"End with a short summary: what you changed and why, and for anything you left unchanged, a brief, respectful explanation.")
+	return b.String()
+}
+
+func isShepherdComment(c domain.Comment) bool { return strings.Contains(c.Body, "🐑") }
+
+func feedbackTitles(cs []domain.Comment) string {
+	parts := make([]string, 0, len(cs))
+	for _, c := range cs {
+		parts = append(parts, oneLine(c.Body))
+	}
+	return strings.Join(parts, " | ")
+}
+
+func oneLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	return clip(s, 140)
+}
+
+func clip(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 func (d Deps) notify(ctx context.Context, level, title, msg, url string, checks []domain.Check) {
