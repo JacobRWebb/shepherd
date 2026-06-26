@@ -1,0 +1,22 @@
+# Shepherd runtime state (session registry, logs)
+.shepherd/
+
+# Default worktrees root (sibling dir); ignore if created inside the repo
+.shepherd-worktrees/
+
+# Build artifacts
+/shepherd
+/shepherd.exe
+/dist/
+*.exe
+*.out
+
+# Go
+/vendor/
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

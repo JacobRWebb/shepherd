@@ -1,0 +1,6 @@
+# Normalize line endings to LF in the repository.
+* text=auto eol=lf
+*.go text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.cmd text eol=crlf
