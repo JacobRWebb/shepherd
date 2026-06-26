@@ -31,12 +31,21 @@ func effectiveVersion() string {
 	return version
 }
 
+func renderVersion(short bool, v string) string {
+	if short {
+		return v
+	}
+	return fmt.Sprintf("shepherd %s (commit %s, built %s, %s %s/%s)",
+		v, commit, date, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+}
+
 func newVersionCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "version",
 		Short: "Print version information",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			st := stateFrom(cmd)
+			short, _ := cmd.Flags().GetBool("short")
 			v := effectiveVersion()
 			info := map[string]string{
 				"version": v,
@@ -47,10 +56,11 @@ func newVersionCmd() *cobra.Command {
 				"arch":    runtime.GOARCH,
 			}
 			st.Out.Result(info, func() string {
-				return fmt.Sprintf("shepherd %s (commit %s, built %s, %s %s/%s)",
-					v, commit, date, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+				return renderVersion(short, v)
 			})
 			return nil
 		},
 	}
+	cmd.Flags().Bool("short", false, "print only the bare version string")
+	return cmd
 }
