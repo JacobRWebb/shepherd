@@ -17,6 +17,13 @@ import (
 	"github.com/JacobRWebb/shepherd/internal/domain"
 )
 
+// PermissionBypass is the claude --permission-mode used by Shepherd's unattended
+// flows (crew agents, ship/babysit auto-fix, deliver). Unlike "acceptEdits" —
+// which lets an agent edit files but still gates command execution — it lets the
+// agent both edit AND run commands (build/test) without prompting, so it can
+// verify its own work. Only ever used inside isolated worktrees.
+const PermissionBypass = "bypassPermissions"
+
 // Spec holds the config-derived knobs common to both modes. Zero values fall
 // back to the ClaudeConfig defaults.
 type Spec struct {

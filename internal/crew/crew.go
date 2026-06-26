@@ -95,10 +95,10 @@ func Run(ctx context.Context, d Deps, o Options) (Result, error) {
 			Spec: agent.Spec{
 				Prompt:         agentPrompt(t),
 				Model:          o.Model,
-				PermissionMode: "acceptEdits",
+				PermissionMode: agent.PermissionBypass,
 				SessionID:      uuid.NewString(),
 			},
-			OutputFormat: "json",
+			OutputFormat: "stream-json", // NDJSON to the session log => live progress
 		}
 		if _, serr := d.Sessions.Start(ctx, session.Spec{
 			Name:    name,
@@ -264,18 +264,29 @@ func diffStat(ctx context.Context, dir string) string {
 	return strings.TrimSpace(out)
 }
 
+// extractSummary pulls the agent's final summary out of a session log. Logs are
+// NDJSON (stream-json) or a single json envelope; in both cases the summary is
+// the "result" field of the last result-bearing line.
 func extractSummary(b []byte) string {
 	s := strings.TrimSpace(string(b))
-	var env struct {
-		Result string `json:"result"`
+	if s == "" {
+		return ""
 	}
-	if json.Unmarshal([]byte(s), &env) == nil && env.Result != "" {
-		return truncate(env.Result, 400)
-	}
-	if i := strings.Index(s, "{"); i >= 0 {
-		if json.Unmarshal([]byte(s[i:]), &env) == nil && env.Result != "" {
-			return truncate(env.Result, 400)
+	var summary string
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if len(line) == 0 || line[0] != '{' {
+			continue
 		}
+		var e struct {
+			Result string `json:"result"`
+		}
+		if json.Unmarshal([]byte(line), &e) == nil && e.Result != "" {
+			summary = e.Result // keep the last result-bearing line
+		}
+	}
+	if summary != "" {
+		return truncate(summary, 400)
 	}
 	return truncate(s, 300)
 }

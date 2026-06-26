@@ -152,9 +152,9 @@ func autoFix(ctx context.Context, d Deps, dir, branch string, pres pipeline.Resu
 	if d.Agent == nil {
 		return domain.InvalidInputf("--auto-fix requires the claude CLI")
 	}
-	prompt := "The validation pipeline failed. Fix the failing steps below. Change only what is necessary; do not touch unrelated code.\n\n" + pres.FailureDigest()
+	prompt := "The validation pipeline failed. Fix the failing steps below, then re-run the failing commands yourself to confirm they pass. Change only what is necessary; do not touch unrelated code.\n\n" + pres.FailureDigest()
 	_, err := d.Agent.Headless(ctx, domain.Worktree{Path: dir, Branch: branch}, agent.HeadlessSpec{
-		Spec:         agent.Spec{Prompt: prompt, PermissionMode: "acceptEdits"},
+		Spec:         agent.Spec{Prompt: prompt, PermissionMode: agent.PermissionBypass},
 		OutputFormat: "json",
 	})
 	return err

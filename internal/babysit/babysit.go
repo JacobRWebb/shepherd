@@ -132,10 +132,10 @@ func (d Deps) attemptFix(ctx context.Context, pr domain.PullRequest, sum domain.
 		return fmt.Errorf("no local worktree for branch %q to fix in (run `shepherd new` for it first): %w", pr.HeadRef, err)
 	}
 	prompt := fmt.Sprintf(
-		"Pull request #%d has failing CI checks: %s.\nInvestigate and fix them in this worktree. Change only what is necessary; do not touch unrelated code.",
+		"Pull request #%d has failing CI checks: %s.\nInvestigate and fix them in this worktree, then re-run the relevant build/test commands yourself to confirm they pass. Change only what is necessary; do not touch unrelated code.",
 		pr.Number, failedNames(sum))
 	if _, err := d.Agent.Headless(ctx, wt, agent.HeadlessSpec{
-		Spec:         agent.Spec{Prompt: prompt, PermissionMode: "acceptEdits"},
+		Spec:         agent.Spec{Prompt: prompt, PermissionMode: agent.PermissionBypass},
 		OutputFormat: "json",
 	}); err != nil {
 		return err
